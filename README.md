@@ -1,6 +1,4 @@
-# Unifikovaný monitorovací systém (Senzory a síťové úlohy)
-
-Tento projekt implementuje vestavěný systém v reálném čase, který kombinuje bezdrátovou síťovou komunikaci a environmentální snímání. Je určen pro mikrokontrolérové platformy a podporuje základní komunikaci přes UART, integraci senzorů a jednoduchý síťový protokol založený na adresách.
+# Bezdrátový senzor vlhkosti půdy
 
 ## Funkce
 
