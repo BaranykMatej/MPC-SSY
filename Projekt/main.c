@@ -33,6 +33,8 @@
 #include <avr/interrupt.h>
 #include <derf/io_access.h>
 
+uint8_t convertAdcToHumidityPercent(uint16_t adcValue);
+
 /*- Definitions ------------------------------------------------------------*/
 #if defined(APP_COORDINATOR)
   #define APP_NODE_TYPE     0
@@ -55,6 +57,9 @@
 #define ADDR_REQUEST_MSG 0x10
 #define ADDR_RESPONSE_MSG 0x20
 #define ADDR_CONFIRM_MSG 0x30
+
+#define MODE_TASKS   1
+#define MODE_SENSORS 2
 
 /*- Types ------------------------------------------------------------------*/
 typedef struct PACK
@@ -79,7 +84,6 @@ typedef struct PACK
     int32_t    temperature;
     int32_t    light;
 	int32_t    moist;
-	int32_t	   weight;
   } sensors;
 
   struct PACK
@@ -240,7 +244,6 @@ static void appUartSendMessageHR(uint8_t *data, uint8_t size)
 	printf("Sensors Temp: %d \n\r", BufferHR->sensors.temperature);
 	printf("Sensors Light: %d \n\r", BufferHR->sensors.light);
 	printf("Sensors Moisture: %d \n\r", BufferHR->sensors.moist);
-	printf("Sensors Weight: %d \n\r", BufferHR->sensors.weight);
 	printf("Caption Type: %d \n\r", BufferHR->caption.type);
 	printf("Caption Size: %d \n\r", BufferHR->caption.size);
 	printf("Caption Text:");
@@ -419,9 +422,8 @@ static void appSendData(void)
   appMsg.sensors.battery     = rand() & 0xffff;
   ADC_Init(4,2);
   appMsg.sensors.temperature = ADC_readTemp();
-  appMsg.sensors.moist       = 69;//ADC_get(3);
-  appMsg.sensors.weight       = 420;//ADC_get(3);
-  appMsg.sensors.light       = messno++;//ADC_get(3);
+  appMsg.sensors.moist = (int32_t)convertAdcToHumidityPercent(ADC_get(0));
+
 
 #if defined(APP_COORDINATOR)
   appUartSendMessageHR((uint8_t *)&appMsg, sizeof(appMsg));
@@ -694,15 +696,17 @@ bool TMP102Sensor_ReadTemperature(TMP102Sensor* sensor) {
 }
 
 // Convert ADC to Humidity
-uint8_t convertAdcToHumidityPercent(uint16_t adcValue) {
-	const uint16_t dryAdc = 1023;  
-	const uint16_t wetAdc = 560;   
+uint8_t convertAdcToHumidityPercent(uint16_t adcValue)
+{
+	const uint16_t dryAdc = 1023;
+	const uint16_t wetAdc = 560;
 
 	if (adcValue >= dryAdc) return 0;
 	if (adcValue <= wetAdc) return 100;
 
 	return (uint8_t)(((dryAdc - adcValue) * 100UL) / (dryAdc - wetAdc));
 }
+
 
 
 
@@ -717,59 +721,79 @@ void TMP102Sensor_PrintTemperature(TMP102Sensor* sensor) {
 /*************************************************************************//**
 *****************************************************************************/
 int main(void)
-{	
-	char out_str[30];
-	uint16_t adc_result;
-  SYS_Init();
-  usb_init();
-  _delay_ms(500);
-  stdout = &usb_stream;
-  stdin  = &usb_stream;
-  _delay_ms(500);
-  led_set(0, LED_ON);
-  _delay_ms(1000);
-  
-  
-  
-  
-  ADC_Init(6, 1);
-  
-    TMP102Sensor sensor;
-
-    if (!TMP102Sensor_Init(&sensor)) {
-	    return -1;
-    }
-
-while (1)
 {
-	SYS_TaskHandler();
-	HAL_UartTaskHandler();
-	APP_TaskHandler();
-}
+	char out_str[50];
+	uint16_t adc_result;
+	int mode = MODE_SENSORS;  // Default to sensor mode
+	char input;
 
-    while (1) {
-		// Soil moisture reading functionality on pressing 'Z'
-		// Adc 6 is TDO pin on JTAG header
-		// Disconnect JTAG after uploading
-		int adcHum = 0;
-		int adcBattery = 0;
-		
-		adc_result = ADC_get(adcHum);
-		sprintf(out_str, "Soil moisture is: %d \r\n", adc_result);
-		printf(out_str);
-		
-		uint8_t humidityPercent = convertAdcToHumidityPercent(adc_result);
-		printf("Soil moisture: %d%%\r\n", humidityPercent);
-		
-		 adc_result = ADC_get(adcBattery);
-		 sprintf(out_str, "Battery level: %d \r\n", adc_result);
-		 printf(out_str);
-				
-	    if (TMP102Sensor_ReadTemperature(&sensor)) {
-		    TMP102Sensor_PrintTemperature(&sensor);
-		    } else {
-		    printf("Failed to read TMP102 temperature.\n");
-	    }
-    }
- }
+	SYS_Init();
+	usb_init();
+	_delay_ms(500);
+	stdout = &usb_stream;
+	stdin  = &usb_stream;
+	_delay_ms(500);
+	led_set(0, LED_ON);
+	_delay_ms(1000);
+
+	ADC_Init(6, 1);
+	TMP102Sensor sensor;
+
+	if (!TMP102Sensor_Init(&sensor)) {
+		return -1;
+	}
+
+	printf("Starting unified monitoring system.\n");
+	printf("Press '1' for Task Mode, '2' for Sensor Mode, 'q' to quit.\n");
+
+	while (1) {
+		if (fgetc(stdin) != EOF) {
+			input = getchar();
+			printf("Input: %c\n", input);
+
+			if (input == '1') {
+				mode = MODE_TASKS;
+				printf("Switched to System Task Mode.\n");
+			}
+			else if (input == '2') {
+				mode = MODE_SENSORS;
+				printf("Switched to Sensor Reading Mode.\n");
+			}
+			else if (input == 'q') {
+				printf("Exiting...\n");
+				break;
+			}
+			else {
+				printf("Unknown input. Use '1', '2', or 'q'.\n");
+			}
+		}
+
+		if (mode == MODE_TASKS) {
+			SYS_TaskHandler();
+			HAL_UartTaskHandler();
+			APP_TaskHandler();
+			printf("Running System Tasks...\n");
+		}
+		else if (mode == MODE_SENSORS) {
+			int adcHum = 0;
+
+			adc_result = ADC_get(adcHum);
+			printf("Soil moisture raw: %d\n", adc_result);
+
+
+			uint8_t humidityPercent = convertAdcToHumidityPercent(adc_result);
+			printf("Soil moisture: %d%%\r\n", humidityPercent);
+
+			if (TMP102Sensor_ReadTemperature(&sensor)) {
+				TMP102Sensor_PrintTemperature(&sensor);
+				} else {
+				printf("Failed to read TMP102 temperature.\n");
+			}
+		}
+
+		_delay_ms(1000); // Slow down loop
+	}
+
+	return 0;
+}
 
